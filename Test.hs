@@ -105,6 +105,7 @@ isNotDuplicate :: [String] -> Bool
 isNotDuplicate strList = findDup lowerStrList strList
     where lowerStrList = map (map toLower) strList
           findDup [] [] = True
+          findDup [x] [y] = x /= y
           findDup (x:xs) (y:ys) | x `elem` xs  = False
                                 | otherwise = findDup xs ys
 
@@ -123,21 +124,30 @@ prop_create_select (Word table) (Word str) num = monadicIO $ do
     run $ runDB $ createTable table ["t","b"]
     run $ runDB $ insertInTable table ["t","b"] [str,show num] [num] 
     ans <- run $ runDB $ selectTable "*" table "" 
-
     let colVals = map snd ans
+    monitor (
+      whenFail'
+      (putStrLn $ "strinDatabase: " ++ (show $ safeHead colVals) ++ " str: " ++ show str ))
+    monitor (
+      whenFail'
+      (putStrLn $ "strinDatabase2: " ++ (safeHead colVals) ++ " str2: " ++ str ))
+
     assert(safeHead colVals == str && ((safeRead (safeLast colVals)) :: Int) == num )  
 
---prop_dyn_create_select :: Word -> FixedStringList ->  Property
---prop_dyn_create_select (Word table) (Word str) num = monadicIO $ do
---    tables <- run getDBTables
---    if map toLower table `elem` tables then run $ runDB $ dropTable table else return [("","")]
+prop_dyn_create_select :: Word -> FixedStringList -> [Int] -> Property
+prop_dyn_create_select (Word table) (FixedStringList strings) num = monadicIO $ do
+    tables <- run getDBTables
+    if map toLower table `elem` tables then run $ runDB $ dropTable table else return [("","")]
     
---    run $ runDB $ createTable table ["t","b"]
---    run $ runDB $ insertInTable table ["t","b"] [str,show num] [num] 
---    ans <- run $ runDB $ selectTable "*" table "" 
+    let colums = head strings
+    run $ runDB $ createTable table colums
+    run $ sequence [ runDB $ insertInTable table colums list num | list <- strings ]
+    ans <- run $ runDB $ selectTable "*" table "" 
 
---    let colVals = map snd ans
---    assert(safeHead colVals == str && ((safeRead (safeLast colVals)) :: Int) == num )  
+    let colVals = map snd ans
+    assert( length ans == ((length colums) * length strings))
+    --assert( )
+    --assert(safeHead colVals == str && ((safeRead (safeLast colVals)) :: Int) == num )  
 
 prop_delete_select :: Word -> Word -> Int ->  Property
 prop_delete_select (Word table) (Word str) num = monadicIO $ do
@@ -268,7 +278,7 @@ stringListGen = sized $ \s -> do
 stringListGen' :: Gen [[String]]
 stringListGen' = sized $ \s -> do 
   let s' = if s < 2 then 2 else s
-  vectorOf 5 $ suchThat (vectorOf s' $ stringGen) isNotDuplicate
+  suchThat (vectorOf 5 $ suchThat (vectorOf s' $ stringGen) isNotDuplicate) (\x -> isNotDuplicate $ concat x)
 
 joinClause :: String -> String -> String
 joinClause table column = "cross join " ++ table ++ " using (" ++ column ++ ");" 
@@ -286,7 +296,7 @@ instance Arbitrary FixedStringList where
   arbitrary = do
                 list <- stringListGen'
                 return (FixedStringList list)
-
+  shrink (FixedStringList l) = [ FixedStringList x | x <- shrink l, not $ null x, not $ any null x, not $ any (any null) x ]
 
 newtype Word = Word String
   deriving (Show,Eq)
