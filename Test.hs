@@ -23,26 +23,30 @@ toPairs (x:[]) = [(x,x)]
 toPairs (x:y:xs)  = [(x,y)] ++ (toPairs xs) 
 
 main :: IO ()
-main = do --quickCheckWith stdArgs {maxSuccess = 500} prop_create_select
-          let strings = [("prop_create_select",quickCheck prop_create_select),
-                        ("prop_delete_select",quickCheck prop_delete_select),
-                        ("prop_dyn_delete_select",quickCheck prop_dyn_delete_select),
-                        ("prop_join_select",quickCheck prop_join_select),
-                        ("prop_update",quickCheck prop_update),
-                        ("prop_dyn_update",quickCheck prop_dyn_update)]
-          
-          mapM_ (\(x,y) -> putStrLn x >> y) strings
+main = do 
+       let strings = [("prop_create_select:",quickCheck prop_create_select),
+                      ("prop_dyn_create_select:",quickCheck prop_dyn_create_select),
+                      ("prop_delete_select:",quickCheck prop_delete_select),
+                      ("prop_dyn_delete_select:",quickCheck prop_dyn_delete_select),
+                      ("prop_join_select:",quickCheck prop_join_select),
+                      ("prop_update:",quickCheck prop_update),
+                      ("prop_dyn_update:",quickCheck prop_dyn_update),
+                      ("quickCheck prop_like:", quickCheck prop_like),
+                      ("prop_dyn_or:", quickCheck prop_dyn_or)]
+       mapM_ (\(x,y) -> putStrLn x >> y >> removeFile "test.db") strings
 
+--quickCheckWith stdArgs {maxSuccess = 500} prop_create_select
+         
 
 safeHead :: [String] -> String  
 safeHead list = case take 1 list of 
         [] -> "" 
         otherwise -> head list
 
-safeHead' :: [[String]] -> [String]
-safeHead' list = case take 1 list of 
-        [] -> [""]
-        otherwise -> head list
+--safeHead' :: [[String]] -> [String]
+--safeHead' list = case take 1 list of 
+--        [] -> [""]
+--        otherwise -> head list
 
 safeLast :: [String] -> String
 safeLast list = case drop ((length list)-1) list of 
@@ -94,12 +98,12 @@ getDBTables = do
     tables <- runDB $ "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
     return $ map ((map toLower). snd) tables
 
-removeDuplicate :: [String] -> [String] 
-removeDuplicate strList = findDup lowerStrList strList
-    where lowerStrList = map (map toLower) strList
-          findDup [] [] = []
-          findDup (x:xs) (y:ys) | x `elem` xs  = findDup xs ys
-                                | otherwise = [y] ++ findDup xs ys
+--removeDuplicate :: [String] -> [String] 
+--removeDuplicate strList = findDup lowerStrList strList
+--    where lowerStrList = map (map toLower) strList
+--          findDup [] [] = []
+--          findDup (x:xs) (y:ys) | x `elem` xs  = findDup xs ys
+--                                | otherwise = [y] ++ findDup xs ys
 
 isNotDuplicate :: [String] -> Bool
 isNotDuplicate strList = findDup lowerStrList strList
@@ -146,8 +150,6 @@ prop_dyn_create_select (Word table) (FixedStringList strings) num = monadicIO $ 
 
     let colVals = map snd ans
     assert( length ans == ((length colums) * length strings))
-    --assert( )
-    --assert(safeHead colVals == str && ((safeRead (safeLast colVals)) :: Int) == num )  
 
 prop_delete_select :: Word -> Word -> Int ->  Property
 prop_delete_select (Word table) (Word str) num = monadicIO $ do
@@ -157,7 +159,7 @@ prop_delete_select (Word table) (Word str) num = monadicIO $ do
     run $ runDB $ createTable table ["t","b"]
     run $ runDB $ insertInTable table ["t","b"] [str,show num] [num] 
 
-    run $ runDB $ deleteTable table (whereClause [("b",show num)]) 
+    run $ runDB $ deleteTable table (whereClause [("b",show num, "")]) 
     ans <- run $ runDB $ selectTable "*" table "" 
 
     assert(null ans)
@@ -173,10 +175,10 @@ prop_dyn_delete_select (Word table) (FixedStringList strings) num = forAll (choo
     run $ sequence [ runDB $ insertInTable table colums list num | list <- strings ]
 
     ansBefore <- run $ runDB $ selectTable "*" table ""
-    run $ runDB $ deleteTable table (whereClause [(head colums, rowToDelete)])
+    run $ runDB $ deleteTable table (whereClause [(head colums, rowToDelete, "")])
     ansAfter <- run $ runDB $ selectTable "*" table ""
     
-    ansDelCheck <- run $ runDB $ selectTable "*" table (whereClause [(head colums,rowToDelete)]) 
+    ansDelCheck <- run $ runDB $ selectTable "*" table (whereClause [(head colums,rowToDelete,"")]) 
 
     assert(length ansBefore - length colums == length ansAfter)
     assert(null ansDelCheck)
@@ -210,10 +212,10 @@ prop_update (Word table) (Word str) (Word newStr) num = (str /= newStr) ==> mona
     
     run $ runDB $ createTable table ["t","b"]
     run $ runDB $ insertInTable table ["t","b"] [str,show num] [num] 
-    ansOld <- run $ runDB $ selectTable "t" table (whereClause [("b",show num),("t",str)])  
+    ansOld <- run $ runDB $ selectTable "t" table (whereClause [("b",show num,"and"),("t",str,"")])  
 
-    run $ runDB $ updateTable table "t" newStr (whereClause [("b",show num),("t",str)])
-    ansNew <- run $ runDB $ selectTable "t" table (whereClause [("b",show num),("t",newStr)])    
+    run $ runDB $ updateTable table "t" newStr (whereClause [("b",show num,"and"),("t",str,"")])
+    ansNew <- run $ runDB $ selectTable "t" table (whereClause [("b",show num,"and"),("t",newStr,"")])    
 
     assert(concat(map snd ansOld) /= concat(map snd ansNew))
 
@@ -228,15 +230,38 @@ prop_dyn_update (Word table) (FixedStringList strings) num = monadicIO $ do
 
     run $ runDB $ createTable table colums 
     run $ sequence [ runDB $ insertInTable table colums list num | list <- (take 5 strings) ]
-    ansOld <- run $ runDB $ selectTable str table (whereClause [(str,str)])  
+    ansOld <- run $ runDB $ selectTable str table (whereClause [(str,str,"")])  
 
-    run $ runDB $ updateTable table str newStr (whereClause [(str,str)])
-    ansNew <- run $ runDB $ selectTable str table (whereClause [(str,newStr)])    
+    run $ runDB $ updateTable table str newStr (whereClause [(str,str,"")])
+    ansNew <- run $ runDB $ selectTable str table (whereClause [(str,newStr,"")])    
 
     assert(concat(map snd ansOld) /= concat(map snd ansNew))
 
+prop_like :: OneChar -> OneChar ->  Property
+prop_like (OneChar word1) (OneChar word2) = (word1 /= word2) ==> monadicIO $ do
+  notEqual <- run $ runDB $ ("SELECT '" ++ [word1] ++ "' LIKE '" ++ [word2] ++ "' ;")
+  assert(snd (head notEqual) == show 0)
 
+prop_dyn_or :: Word -> FixedStringList -> [Int] -> Property
+prop_dyn_or (Word table) (FixedStringList strings) num = forAll (choose (1, length strings - 1)) $ \chooseElem -> monadicIO $ do
+    tables <- run getDBTables
+    if map toLower table `elem` tables then run $ runDB $ dropTable table else return [("","")]
+    
+    let colums = head strings                 
+    let str = head (head strings)             
+    let secStr = head(drop 1 (head strings))  
+    let randStr = head $ strings !! chooseElem 
 
+    run $ runDB $ createTable table colums 
+    run $ sequence [ runDB $ insertInTable table colums list num | list <- (take 5 strings) ]
+    
+    noneInAnsList <- run $ runDB $ selectTable str table (whereClause $ map (\x -> (str,x,"or")) (concat $ map (drop 1) strings))
+    oneInAnsList <- run $ runDB $ selectTable str table (whereClause $ [(str,randStr,"or")] ++ map (\x -> (str,x,"or")) (drop 1 $ head strings))
+    allInAnsList <- run $ runDB $ selectTable str table (whereClause $ map (\x -> (str,x,"or")) (map head strings))
+        
+    assert (null noneInAnsList)
+    assert (randStr `elem` (map snd oneInAnsList) && secStr `notElem` (map snd oneInAnsList))
+    assert((map head strings) `elem` [(map snd allInAnsList)]) 
 
 
 createTable :: String -> [String] -> String
@@ -283,12 +308,13 @@ stringListGen' = sized $ \s -> do
 joinClause :: String -> String -> String
 joinClause table column = "cross join " ++ table ++ " using (" ++ column ++ ");" 
 
-whereClause :: [(String,String)] -> String
-whereClause wher = "where " ++ (removeNLastElements 5 $ foldr (++) "" (map (\(x,y) -> x ++ " = \'" ++ y ++ "\' and ")wher)) ++ ";" 
+whereClause :: [(String,String,String)] -> String
+whereClause wher = "where " ++ (removeNLastElements (length(thirdElemTuple)+2) $ foldr (++) "" (map (\(x,y,z) -> x ++ " = \'" ++ y ++ "\' " ++ z ++ " ")wher)) ++ ";" 
+  where thirdElemTuple = thirdElemTuple' (last wher)
+        thirdElemTuple' (a,b,c) = c
 
 removeNLastElements :: Int -> String -> String
 removeNLastElements int list = take (length list-int) list
- 
 
 newtype FixedStringList = FixedStringList [[String]] deriving (Eq,Show)
 
@@ -308,3 +334,9 @@ instance Arbitrary Word where
     return (Word l)
 
 
+newtype OneChar = OneChar Char deriving (Show,Eq)
+
+instance Arbitrary OneChar where
+  arbitrary = do 
+    letter <- letterGen
+    return (OneChar (toLower letter))
