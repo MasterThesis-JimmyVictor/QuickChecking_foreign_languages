@@ -9,6 +9,7 @@ import Data.Text (unpack, pack, split)
 import Data.Char (isLetter, isSpace, toLower)
 
 import Data.Int
+import Data.List (sort)
 import Database.SQLite.Types
 import Database.SQLite.Base
 import Database.SQLite
@@ -24,7 +25,8 @@ toPairs (x:y:xs)  = [(x,y)] ++ (toPairs xs)
 
 main :: IO ()
 main = do 
-       let strings = [("prop_create_select:",quickCheck prop_create_select),
+       let strings = [
+                      ("prop_create_select:",quickCheck prop_create_select),
                       ("prop_dyn_create_select:",quickCheck prop_dyn_create_select),
                       ("prop_delete_select:",quickCheck prop_delete_select),
                       ("prop_dyn_delete_select:",quickCheck prop_dyn_delete_select),
@@ -32,7 +34,10 @@ main = do
                       ("prop_update:",quickCheck prop_update),
                       ("prop_dyn_update:",quickCheck prop_dyn_update),
                       ("quickCheck prop_like:", quickCheck prop_like),
-                      ("prop_dyn_or:", quickCheck prop_dyn_or)]
+                      ("prop_dyn_or:", quickCheck prop_dyn_or),
+                      ("prop_dyn_or:", quickCheck prop_dyn_or),
+                      ("prop_dyn_order_by:",quickCheck prop_dyn_order_by)
+                      ]
        mapM_ (\(x,y) -> putStrLn x >> y >> removeFile "test.db") strings
 
 --quickCheckWith stdArgs {maxSuccess = 500} prop_create_select
@@ -237,6 +242,27 @@ prop_dyn_update (Word table) (FixedStringList strings) num = monadicIO $ do
 
     assert(concat(map snd ansOld) /= concat(map snd ansNew))
 
+prop_dyn_order_by :: Word -> FixedIntList -> [Int] ->  Property
+prop_dyn_order_by (Word table) (FixedIntList strings) num = forAll (choose (0, length (head strings) - 1)) $ \colElem -> monadicIO $  do
+    tables <- run getDBTables
+    if map toLower table `elem` tables then run $ runDB $ dropTable table else return [("","")]
+
+    let colums = head strings
+    let rowToOrderBy = colums !! colElem
+    run $ runDB $ createTable table colums
+    run $ sequence [ runDB $ insertInTable table colums list num | list <- drop 1 strings ]
+
+    ansBefore <- run $ runDB $ selectTable "*" table ""
+    ansAfter <- run $ runDB $  selectTable "*" table (orderByClause rowToOrderBy)
+    
+    let beforeList =  map (snd . (!! colElem)) $ getRows (length colums) ansBefore
+    let afterList  =  map (snd . (!! colElem)) $ getRows (length colums) ansAfter
+    monitor (
+      whenFail'
+      (putStrLn $ "beforeList" ++ (show beforeList) ++  "sorted beforeList: " ++ show (sort beforeList) ++ " afterList: " ++ show afterList ))
+
+    assert(sort beforeList == afterList)
+
 prop_like :: OneChar -> OneChar ->  Property
 prop_like (OneChar word1) (OneChar word2) = (word1 /= word2) ==> monadicIO $ do
   notEqual <- run $ runDB $ ("SELECT '" ++ [word1] ++ "' LIKE '" ++ [word2] ++ "' ;")
@@ -262,6 +288,16 @@ prop_dyn_or (Word table) (FixedStringList strings) num = forAll (choose (1, leng
     assert (null noneInAnsList)
     assert (randStr `elem` (map snd oneInAnsList) && secStr `notElem` (map snd oneInAnsList))
     assert((map head strings) `elem` [(map snd allInAnsList)]) 
+
+
+getRows :: Int -> [(String,String)] -> [[(String,String)]]
+getRows len list = spliter list
+  where spliter [] = []
+        spliter ls = let (l1,rest) = (splitAt len ls)
+                     in  [l1] ++ spliter rest
+
+orderByClause :: String -> String
+orderByClause val = "order by "  ++ val  ++ " asc" 
 
 
 createTable :: String -> [String] -> String
@@ -305,6 +341,17 @@ stringListGen' = sized $ \s -> do
   let s' = if s < 2 then 2 else s
   suchThat (vectorOf 5 $ suchThat (vectorOf s' $ stringGen) isNotDuplicate) (\x -> isNotDuplicate $ concat x)
 
+intGen :: Gen Int
+intGen = arbitrary
+
+intListGen :: Gen [[String]]
+intListGen = sized $ \s -> do 
+  let s' = if s < 2 then 2 else s
+  colums <- vectorOf s' $ stringGen
+  numbers <- listOf1 $ vectorOf s' $ intGen
+  return ([colums] ++ map (map show) numbers ) 
+
+
 joinClause :: String -> String -> String
 joinClause table column = "cross join " ++ table ++ " using (" ++ column ++ ");" 
 
@@ -323,6 +370,16 @@ instance Arbitrary FixedStringList where
                 list <- stringListGen'
                 return (FixedStringList list)
   shrink (FixedStringList l) = [ FixedStringList x | x <- shrink l, not $ null x, not $ any null x, not $ any (any null) x ]
+
+
+newtype FixedIntList = FixedIntList [[String]] deriving (Eq,Show)
+
+instance Arbitrary FixedIntList where
+  arbitrary = do
+                list <- intListGen
+                return (FixedIntList list)
+  --shrink (FixedIntList l) = [ FixedIntList x | x <- shrink l, not $ null x, not $ any null x, not $ any (any null) x ]
+
 
 newtype Word = Word String
   deriving (Show,Eq)
