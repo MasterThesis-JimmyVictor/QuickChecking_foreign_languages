@@ -33,7 +33,7 @@ main = do
                       ("prop_join_select:",quickCheck prop_join_select),
                       ("prop_update:",quickCheck prop_update),
                       ("prop_dyn_update:",quickCheck prop_dyn_update),
-                      ("quickCheck prop_like:", quickCheck prop_like),
+                      ("prop_like:", quickCheck prop_like),
                       ("prop_dyn_or:", quickCheck prop_dyn_or),
                       ("prop_dyn_or:", quickCheck prop_dyn_or),
                       ("prop_dyn_order_by:",quickCheck prop_dyn_order_by)
